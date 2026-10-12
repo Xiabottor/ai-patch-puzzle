@@ -171,6 +171,8 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
 <symbol id="i-am" viewBox="0 0 16 16"><path d="M1 8h14"/><rect x="4" y="3" width="3" height="10"/><rect x="9" y="5" width="3" height="6"/></symbol>
 <symbol id="i-ab" viewBox="0 0 16 16"><path d="M1 14h14"/><rect x="4" y="3" width="3" height="9"/><rect x="9" y="6" width="3" height="6"/></symbol>
 <symbol id="i-cc" viewBox="0 0 16 16"><rect x="2" y="2" width="12" height="12" rx="1"/><rect x="5.5" y="5.5" width="5" height="5"/></symbol>
+<symbol id="i-frame" viewBox="0 0 16 16"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3"/></symbol>
+<symbol id="i-frameoff" viewBox="0 0 16 16"><path d="M2 5V2h3M11 2h3v3M14 11v3h-3M5 14H2v-3"/><path d="M1.5 14.5l13-13"/></symbol>
 <symbol id="i-help" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M6 6.2a2 2 0 113 1.7c-.7.4-1 .8-1 1.6M8 11.5v.2"/></symbol>
 </defs></svg>
 
@@ -213,6 +215,7 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
   <button class="ib" id="zIn" title="放大（+）"><svg><use href="#i-zin"/></svg></button>
   <button class="ib" id="zFit" title="适应窗口（F，单指双击切换）"><svg><use href="#i-fit"/></svg></button>
   <div class="sep touch-only"></div>
+  <button class="ib tog" id="bFrame" title="隐藏 / 显示选区边框（H）：隐藏后单指 / 鼠标拖动改为平移，不会误改选区"><svg><use href="#i-frameoff"/></svg></button>
   <button class="ib tog touch-only" id="bPencil" title="Pencil 模式：用笔框选，单指拖动平移画布"><svg><use href="#i-pen"/></svg></button>
   <div class="sep"></div>
   <button id="bHold" title="按住查看修改前，松开恢复（键盘：按住 B）"><svg><use href="#i-eye"/></svg><span>对比</span></button>
@@ -313,6 +316,7 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
   <b>三指轻点</b><span>重做</span>
   <b>单指双击</b><span>适应窗口 ↔ 放大到选区</span>
   <b>长按再拖</b><span>本次拖动不吸附</span>
+  <b>▢ 隐藏边框</b><span>隐藏选区边框，拖动改为平移</span>
   <b>👁 对比</b><span>按住查看修改前</span>
   <b>竖屏</b><span>点面板顶部可收起 / 展开</span></div></div>
  <div><h4>⌨ 键盘（妙控键盘 / 电脑）</h4><div class="keys">
@@ -324,6 +328,7 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
   <kbd>F 1 Z</kbd><span>适应 / 100% / 缩放到选区</span>
   <kbd>方向键</kbd><span>微调补丁或选区（⇧ ×10）</span>
   <kbd>B</kbd><span>按住看修改前</span>
+  <kbd>H</kbd><span>隐藏 / 显示选区边框</span>
   <kbd>␣</kbd><span>按住拖动平移</span>
   <kbd>⏎ / Esc</kbd><span>应用 / 清除结果</span></div></div>
 </div>
@@ -337,7 +342,7 @@ const $=id=>document.getElementById(id),$$=q=>[...document.querySelectorAll(q)];
 const view=$('view'),stage=$('stage'),vc=view.getContext('2d');
 const S={orig:null,base:null,layer:null,sel:null,res:null,patch:null,fit:'stretch',mu:'px',ratio:'',undo:[],redo:[],rects:[],
   z:1,tx:0,ty:0,dpr:1,showAfter:true,peek:false,space:false,alt:false,awaitingAI:false,lastCopied:-1,copied:false,applied:0,
-  snap:true,grid:false,gridSize:16,guides:[],tab:'sel',layerOnly:false,pencil:false};
+  snap:true,grid:false,gridSize:16,guides:[],tab:'sel',layerOnly:false,pencil:false,hideFrame:false};
 const MAX_UNDO=50,RATIOS=['','1:1','4:3','3:4','16:9','9:16','3:2','2:3','c'];
 const RL={'':'自由','c':'自定义'};
 const TITLES={sel:'① 框选并发送给 AI',paste:'② 贴回 AI 结果',adj:'③ 调整并应用'};
@@ -467,7 +472,7 @@ function drawNow(){drawQ=0;const g=vc,d=S.dpr;g.setTransform(1,0,0,1,0,0);g.clea
   g.drawImage(S.layerOnly?S.layer:B,0,0);
   if(S.patch&&after)g.drawImage(S.patch,s.x+o.dx,s.y+o.dy);
   g.setTransform(d,0,0,d,0,0);
-  if(!s)return;
+  if(!s||S.hideFrame)return;
   const sx=X(s.x),sy=Y(s.y),sw=s.w*z,sh=s.h*z;
   g.fillStyle='rgba(0,0,0,.55)';g.beginPath();g.rect(X(0),Y(0),B.width*z,B.height*z);g.rect(sx,sy,sw,sh);g.fill('evenodd');
   const p=padRect();if(p.w!==s.w||p.h!==s.h){g.setLineDash([6,4]);g.strokeStyle='#fce100';g.lineWidth=1.2;g.strokeRect(X(p.x)+.5,Y(p.y)+.5,p.w*z-1,p.h*z-1);g.setLineDash([]);}
@@ -522,6 +527,11 @@ function setPencil(v,quiet,save=true){S.pencil=v;$('bPencil').classList.toggle('
   if(!quiet)toast(v?'✎ Pencil 模式：用笔框选，单指拖动平移':'Pencil 模式已关闭：单指也可框选');}
 setPencil(pencilPref==='1',true,false);
 $('bPencil').onclick=()=>setPencil(!S.pencil);
+function setFrame(hide,quiet){S.hideFrame=hide;const b=$('bFrame');b.classList.toggle('on',hide);
+  b.querySelector('use').setAttribute('href',hide?'#i-frame':'#i-frameoff');
+  b.title=hide?'显示选区边框（H）':'隐藏选区边框（H）：隐藏后单指 / 鼠标拖动改为平移，不会误改选区';
+  S.guides=[];view.style.cursor=hide?'grab':'crosshair';draw();if(!quiet)toast(hide?'已隐藏选区边框：拖动画布为平移，再点一次恢复':'已显示选区边框');}
+$('bFrame').onclick=()=>setFrame(!S.hideFrame);
 function autoPencil(){if(pencilPref!==null||S.pencil)return;setPencil(true,true);
   toast('检测到 Apple Pencil：已切换为「笔框选、单指平移」，可点工具条 ✎ 关闭');}
 
@@ -549,6 +559,7 @@ view.addEventListener('pointerdown',e=>{if(!S.base)return;
   ptrs.set(e.pointerId,sp);if(e.pointerType==='touch')trackTap(e.pointerId,sp);
   if(ptrs.size===2){startPinch();e.preventDefault();return;}if(ptrs.size>2)return;
   if(e.button===1||S.space){drag={mode:'pan',id:e.pointerId,sp,tx:S.tx,ty:S.ty,pt:e.pointerType};view.style.cursor='grabbing';e.preventDefault();return;}
+  if(S.hideFrame&&e.button===0){drag={mode:'pan',id:e.pointerId,sp,tx:S.tx,ty:S.ty,pt:e.pointerType};view.style.cursor='grabbing';e.preventDefault();return;}
   if(e.button!==0)return;const ip=toImg(sp),h=hit(ip,e.pointerType);
   if(S.pencil&&e.pointerType==='touch'&&!h){drag={mode:'pan',id:e.pointerId,sp,tx:S.tx,ty:S.ty,pt:'touch'};e.preventDefault();return;}
   S.alt=e.altKey;S.guides=[];let p0={x:clamp(ip.x,0,S.base.width),y:clamp(ip.y,0,S.base.height)};if(!h){p0.x=clamp(p0.x+snapAxis('x',[p0.x]),0,S.base.width);p0.y=clamp(p0.y+snapAxis('y',[p0.y]),0,S.base.height);S.guides=[];}
@@ -561,7 +572,7 @@ view.addEventListener('pointermove',e=>{if(!S.base)return;if(e.pointerType==='mo
     const z=clamp(drag.z0*d/drag.d0,0.02,32),ix=(drag.m0.x-drag.tx0)/drag.z0,iy=(drag.m0.y-drag.ty0)/drag.z0;S.z=z;S.tx=m.x-ix*z;S.ty=m.y-iy*z;draw();return;}
   if(drag&&drag.id!==undefined&&drag.id!==e.pointerId)return;
   $('pos').textContent=(ip.x>=0&&ip.y>=0&&ip.x<S.base.width&&ip.y<S.base.height)?`${Math.floor(ip.x)}, ${Math.floor(ip.y)}`:'';
-  if(!drag){if(e.pointerType!=='touch')view.style.cursor=S.space?'grab':({patch:'move',...CUR})[hit(ip,e.pointerType)]||'crosshair';return;}
+  if(!drag){if(e.pointerType!=='touch')view.style.cursor=(S.space||S.hideFrame)?'grab':({patch:'move',...CUR})[hit(ip,e.pointerType)]||'crosshair';return;}
   if(drag.mode==='pan'){S.tx=drag.tx+sp.x-drag.sp.x;S.ty=drag.ty+sp.y-drag.sp.y;draw();return;}
   let dx=ip.x-drag.p0.x,dy=ip.y-drag.p0.y;
   if(!drag.moved&&Math.hypot(dx,dy)*S.z<(e.pointerType==='mouse'?3:e.pointerType==='pen'?2:6))return;drag.moved=true;clearTimeout(lpTimer);
@@ -753,6 +764,7 @@ document.addEventListener('keydown',e=>{
   if(mod&&k==='c'){if(!String(getSelection())){e.preventDefault();$('bCopy').click();}return;}
   if(mod)return;
   if(e.key===' '){e.preventDefault();if(!S.space){S.space=true;view.style.cursor='grab';}return;}
+  if(k==='h'){setFrame(!S.hideFrame);return;}
   if(k==='b'){if(!S.peek){S.peek=true;draw();}return;}
   if(e.key==='?'){help($('help').style.display!=='grid');return;}
   if(k==='c'){setTab('sel');return;}if(k==='v'){setTab('paste');return;}if(k==='a'){setTab('adj');return;}
