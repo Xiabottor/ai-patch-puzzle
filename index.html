@@ -215,6 +215,7 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
   <button class="ib" id="zIn" title="放大（+）"><svg><use href="#i-zin"/></svg></button>
   <button class="ib" id="zFit" title="适应窗口（F，单指双击切换）"><svg><use href="#i-fit"/></svg></button>
   <div class="sep touch-only"></div>
+  <button class="tog" id="bTarget" title="框内拖动 / 微调键 / 方向键的对象：选区或补丁（点击切换）"><svg><use href="#i-crop"/></svg><span id="bTargetT">选区</span></button>
   <button class="ib tog" id="bFrame" title="隐藏 / 显示选区边框（H）：隐藏后单指 / 鼠标拖动改为平移，不会误改选区"><svg><use href="#i-frameoff"/></svg></button>
   <button class="ib tog touch-only" id="bPencil" title="Pencil 模式：用笔框选，单指拖动平移画布"><svg><use href="#i-pen"/></svg></button>
   <div class="sep"></div>
@@ -285,8 +286,8 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
      <button data-v="contain" title="包含：等比缩放完整放入，空白处保留原图">包含</button></div>
     <p id="arWarn" class="hint warn" style="display:none"></p></div>
    <div class="grp"><div class="t">边缘羽化</div><div class="row"><input type="range" id="fe" min="0" max="64" value="8" title="边缘羽化宽度，让补丁与原图自然融合"><span id="fev" class="tag">8px</span></div></div>
-   <div class="grp"><div class="t">补丁偏移<small>在框内拖动也可，靠近 0 自动吸附</small></div>
-    <div class="pad" id="pad" title="微调：有结果时移动补丁，否则移动选区；按住连续移动">
+   <div class="grp"><div class="t">补丁偏移<small>切到「移动补丁」后可在框内拖动，靠近 0 吸附</small></div>
+    <div class="pad" id="pad" title="微调：按「拖动对象」移动选区或补丁；按住连续移动">
      <span></span><button data-d="0,-1" title="上移">▲</button><span></span>
      <button data-d="-1,0" title="左移">◀</button><button id="padStep" title="切换步长 1 / 10 像素">1</button><button data-d="1,0" title="右移">▶</button>
      <span></span><button data-d="0,1" title="下移">▼</button><span></span></div>
@@ -316,6 +317,7 @@ html.touch #hud{padding:5px;gap:3px;bottom:16px}
   <b>三指轻点</b><span>重做</span>
   <b>单指双击</b><span>适应窗口 ↔ 放大到选区</span>
   <b>长按再拖</b><span>本次拖动不吸附</span>
+  <b>选区 / 补丁</b><span>切换框内拖动移动的对象，默认移动选区</span>
   <b>▢ 隐藏边框</b><span>隐藏选区边框，拖动改为平移</span>
   <b>👁 对比</b><span>按住查看修改前</span>
   <b>竖屏</b><span>点面板顶部可收起 / 展开</span></div></div>
@@ -342,7 +344,7 @@ const $=id=>document.getElementById(id),$$=q=>[...document.querySelectorAll(q)];
 const view=$('view'),stage=$('stage'),vc=view.getContext('2d');
 const S={orig:null,base:null,layer:null,sel:null,res:null,patch:null,fit:'stretch',mu:'px',ratio:'',undo:[],redo:[],rects:[],
   z:1,tx:0,ty:0,dpr:1,showAfter:true,peek:false,space:false,alt:false,awaitingAI:false,lastCopied:-1,copied:false,applied:0,
-  snap:true,grid:false,gridSize:16,guides:[],tab:'sel',layerOnly:false,pencil:false,hideFrame:false};
+  snap:true,grid:false,gridSize:16,guides:[],tab:'sel',layerOnly:false,pencil:false,hideFrame:false,dragTarget:'sel'};
 const MAX_UNDO=50,RATIOS=['','1:1','4:3','3:4','16:9','9:16','3:2','2:3','c'];
 const RL={'':'自由','c':'自定义'};
 const TITLES={sel:'① 框选并发送给 AI',paste:'② 贴回 AI 结果',adj:'③ 调整并应用'};
@@ -532,6 +534,9 @@ function setFrame(hide,quiet){S.hideFrame=hide;const b=$('bFrame');b.classList.t
   b.title=hide?'显示选区边框（H）':'隐藏选区边框（H）：隐藏后单指 / 鼠标拖动改为平移，不会误改选区';
   S.guides=[];view.style.cursor=hide?'grab':'crosshair';draw();if(!quiet)toast(hide?'已隐藏选区边框：拖动画布为平移，再点一次恢复':'已显示选区边框');}
 $('bFrame').onclick=()=>setFrame(!S.hideFrame);
+function setTarget(t,quiet){S.dragTarget=t;$('bTargetT').textContent=t==='patch'?'补丁':'选区';$('bTarget').classList.toggle('on',t==='patch');
+  if(!quiet)toast(t==='patch'?'框内拖动 / 微调 = 移动补丁（框线仍可拖角和边）':'框内拖动 / 微调 = 移动选区，补丁会跟着走');}
+$('bTarget').onclick=()=>setTarget(S.dragTarget==='patch'?'sel':'patch');
 function autoPencil(){if(pencilPref!==null||S.pencil)return;setPencil(true,true);
   toast('检测到 Apple Pencil：已切换为「笔框选、单指平移」，可点工具条 ✎ 关闭');}
 
@@ -541,7 +546,7 @@ function evPt(e){const r=view.getBoundingClientRect();return {x:e.clientX-r.left
 const toImg=p=>({x:(p.x-S.tx)/S.z,y:(p.y-S.ty)/S.z});
 function hit(ip,pt){if(!S.sel)return null;const t=(pt==='touch'||(pt!=='mouse'&&pt!=='pen'&&COARSE())?26:pt==='pen'?14:10)/S.z,hs=handles();
   for(let i=0;i<8;i++)if(Math.abs(ip.x-hs[i][0])<=t&&Math.abs(ip.y-hs[i][1])<=t)return HN[i];
-  const s=S.sel;if(ip.x>s.x&&ip.x<s.x+s.w&&ip.y>s.y&&ip.y<s.y+s.h)return S.patch?'patch':'move';
+  const s=S.sel;if(ip.x>s.x&&ip.x<s.x+s.w&&ip.y>s.y&&ip.y<s.y+s.h)return S.patch&&S.dragTarget==='patch'?'patch':'move';
   if(ip.y>s.y&&ip.y<s.y+s.h){if(Math.abs(ip.x-s.x)<=t)return 'w';if(Math.abs(ip.x-s.x-s.w)<=t)return 'e';}
   if(ip.x>s.x&&ip.x<s.x+s.w){if(Math.abs(ip.y-s.y)<=t)return 'n';if(Math.abs(ip.y-s.y-s.h)<=t)return 's';}return null;}
 const ptrs=new Map();let lpTimer=0;
@@ -747,7 +752,7 @@ function holdBtn(id){const b=$(id);const on=e=>{e.preventDefault();try{b.setPoin
   b.addEventListener('pointerdown',on);['pointerup','pointercancel','lostpointercapture'].forEach(t=>b.addEventListener(t,offf));b.addEventListener('contextmenu',e=>e.preventDefault());}
 holdBtn('bHold');holdBtn('bHold2');
 let padStep=1;$('padStep').onclick=()=>{padStep=padStep===1?10:1;$('padStep').textContent=padStep;};
-function nudge(dx,dy){if(!S.base)return;if(S.patch){$('ox').value=(+$('ox').value||0)+dx;$('oy').value=(+$('oy').value||0)+dy;draw();}
+function nudge(dx,dy){if(!S.base)return;if(S.patch&&S.dragTarget==='patch'){$('ox').value=(+$('ox').value||0)+dx;$('oy').value=(+$('oy').value||0)+dy;draw();}
   else{S.sel.x+=dx;S.sel.y+=dy;clampSel();sync();draw();commitSelSoon();}}
 $$('#pad button[data-d]').forEach(b=>{let t1=0,t2=0;const [dx,dy]=b.dataset.d.split(',').map(Number);
   const stop=()=>{clearTimeout(t1);clearInterval(t2);b.classList.remove('down');};
@@ -785,7 +790,7 @@ document.addEventListener('keydown',e=>{
   if(k==='+'||k==='='){setZoom(S.z*1.25);return;}if(k==='-'){setZoom(S.z/1.25);return;}
   const d={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[k];
   if(d){e.preventDefault();const m=e.shiftKey?10:1;
-    if(S.patch){$('ox').value=(+$('ox').value||0)+d[0]*m;$('oy').value=(+$('oy').value||0)+d[1]*m;draw();}
+    if(S.patch&&S.dragTarget==='patch'){$('ox').value=(+$('ox').value||0)+d[0]*m;$('oy').value=(+$('oy').value||0)+d[1]*m;draw();}
     else{S.sel.x+=d[0]*m;S.sel.y+=d[1]*m;clampSel();sync();draw();commitSelSoon();}return;}
   if(e.key==='Enter'&&S.patch){e.preventDefault();$('bApply').click();}});
 document.addEventListener('keyup',e=>{if(e.key==='Alt')S.alt=false;if(e.key===' '){S.space=false;if(!drag)view.style.cursor='crosshair';}if(e.key.toLowerCase()==='b'){S.peek=false;draw();}});
