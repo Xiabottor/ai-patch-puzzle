@@ -380,9 +380,9 @@ const store={get(k){try{return localStorage.getItem(k);}catch(_){return null;}},
 // ---------- load ----------
 async function setOrig(blob){
   let c;try{c=await decode(blob);}catch(e){return toast(e.message,1);}
-  S.orig=copyCanvas(c);S.base=c;S.layer=mk(c.width,c.height);S.undo=[];S.redo=[];S.rects=[];S.res=null;S.patch=null;S.copied=false;S.applied=0;
+  S.orig=copyCanvas(c);S.base=c;S.layer=mk(c.width,c.height);S.undo=[];S.redo=[];S.rects=[];S.res=null;S.patch=null;S.copied=false;S.applied=0;selSaved=null;
   S.sel={x:Math.round(c.width/4),y:Math.round(c.height/4),w:Math.max(1,Math.round(c.width/2)),h:Math.max(1,Math.round(c.height/2))};
-  if(ratio())applyRatioNow(false);
+  if(ratio())applyRatioNow(false);selSaved={...S.sel};
   $('ox').value=0;$('oy').value=0;$('empty').style.display='none';setTab('sel');
   fitView();sync();rebuild();toast('原图已载入 '+c.width+'×'+c.height);}
 async function setRes(blob){
@@ -396,7 +396,7 @@ const route=b=>pasteTarget()==='orig'?setOrig(b):setRes(b);
 // ---------- ratio ----------
 function ratio(){const v=S.ratio;if(!v)return null;const [a,b]=v==='c'?[+$('arw').value,+$('arh').value]:v.split(':').map(Number);return a>0&&b>0?a/b:null;}
 function buildRatio(){$('ratioChips').innerHTML=RATIOS.map(r=>`<button data-r="${r}" class="${r===S.ratio?'on':''}">${RL[r]??r}</button>`).join('');$('arCustom').hidden=S.ratio!=='c';}
-function setRatio(r){S.ratio=r;buildRatio();applyRatioNow();}
+function setRatio(r){S.ratio=r;buildRatio();applyRatioNow();commitSel();}
 function fitRatio(r,ax,ay,sx,sy,w,h,prim){
   if(prim==='h')w=h*r;else h=w/r;
   const mW=sx>0?S.base.width-ax:ax,mH=sy>0?S.base.height-ay:ay;
@@ -598,7 +598,7 @@ view.addEventListener('pointermove',e=>{if(!S.base)return;if(e.pointerType==='mo
 function endDrag(){if(!drag)return;const d=drag;drag=null;S.guides=[];view.style.cursor=S.space?'grab':'crosshair';
   if(d.mode==='pan'||d.mode==='patch'){draw();return;}
   if(d.mode==='new'&&(!d.moved||S.sel.w<3||S.sel.h<3))S.sel=d.s0;
-  clampSel();sync();rebuild();}
+  clampSel();sync();rebuild();commitSel();}
 function onUp(e){const pinch=drag&&drag.mode==='pinch'?drag:null;ptrs.delete(e.pointerId);clearTimeout(lpTimer);
   if(pinch){if(ptrs.size===0)drag=null;}
   else if(!(drag&&drag.id!==undefined&&drag.id!==e.pointerId))endDrag();
@@ -626,7 +626,7 @@ view.addEventListener('wheel',e=>{if(!S.base)return;e.preventDefault();
 ['sx','sy','sw','sh'].forEach(id=>$(id).addEventListener('change',()=>{if(!S.base)return;
   let n={x:+$('sx').value,y:+$('sy').value,w:Math.max(1,+$('sw').value),h:Math.max(1,+$('sh').value)};const r=ratio();
   if(r)n=fitRatio(r,clamp(n.x,0,S.base.width-1),clamp(n.y,0,S.base.height-1),1,1,n.w,n.h,id==='sh'?'h':'w');
-  S.sel=roundSel(n);clampSel();sync();rebuild();}));
+  S.sel=roundSel(n);clampSel();sync();rebuild();commitSel();}));
 $('mv').addEventListener('input',()=>{if(S.base){sync();rebuild();}});
 function seg(id,cb){$(id).addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;[...$(id).children].forEach(x=>x.classList.toggle('on',x===b));cb(b.dataset.v);});}
 seg('muSeg',v=>{S.mu=v;if(S.base){sync();rebuild();}});
@@ -643,7 +643,7 @@ $('grab').onclick=()=>{if(STACK.matches)document.body.classList.toggle('sheet-mi
 $$('[data-al]').forEach(b=>b.onclick=()=>align(b.dataset.al));
 function align(a){if(!S.base)return;const s=S.sel,B=S.base;
   if(a==='l')s.x=0;if(a==='r')s.x=B.width-s.w;if(a==='hc'||a==='c')s.x=Math.round((B.width-s.w)/2);
-  if(a==='t')s.y=0;if(a==='b')s.y=B.height-s.h;if(a==='vc'||a==='c')s.y=Math.round((B.height-s.h)/2);clampSel();sync();rebuild();}
+  if(a==='t')s.y=0;if(a==='b')s.y=B.height-s.h;if(a==='vc'||a==='c')s.y=Math.round((B.height-s.h)/2);clampSel();sync();rebuild();commitSel();}
 $('bSnap').onclick=()=>{S.snap=!S.snap;$('bSnap').classList.toggle('on',S.snap);};
 $('bGrid').onclick=()=>{S.grid=!S.grid;$('bGrid').classList.toggle('on',S.grid);draw();};
 $('gridSel').onchange=e=>{S.gridSize=+e.target.value;draw();};
@@ -710,15 +710,26 @@ function snapRect(r){const B=S.base,x=clamp(r.x,0,B.width),y=clamp(r.y,0,B.heigh
   if(x1<=x||y1<=y)return null;const w=x1-x,h=y1-y,c=mk(w,h),l=mk(w,h);
   c.getContext('2d').drawImage(B,x,y,w,h,0,0,w,h);l.getContext('2d').drawImage(S.layer,x,y,w,h,0,0,w,h);return {x,y,c,l};}
 function restore(sn){for(const [dst,src] of [[S.base,sn.c],[S.layer,sn.l]]){const g=dst.getContext('2d');g.clearRect(sn.x,sn.y,src.width,src.height);g.drawImage(src,sn.x,sn.y);}}
+// 选区（框线）历史：每次手动调整结束后记一步，撤销 / 重做与补丁历史共用同一条时间线
+let selSaved=null,selTimer=0;
+const sameSel=(a,b)=>a&&b&&a.x===b.x&&a.y===b.y&&a.w===b.w&&a.h===b.h;
+function commitSel(){clearTimeout(selTimer);if(!S.sel||!S.base)return;
+  if(!selSaved)selSaved={...S.sel};
+  if(!sameSel(selSaved,S.sel)){pushUndo({selB:{...selSaved},selA:{...S.sel}});selSaved={...S.sel};updUI();}}
+function commitSelSoon(){clearTimeout(selTimer);selTimer=setTimeout(commitSel,450);}
 function pushUndo(u){S.undo.push(u);if(S.undo.length>MAX_UNDO)S.undo.shift();S.redo=[];}
 $('bApply').onclick=()=>{if(!S.patch)return toast('还没有可应用的结果',1);
   const s=S.sel,o=off(),r={x:s.x+o.dx,y:s.y+o.dy,w:s.w,h:s.h},before=snapRect(r);if(!before)return toast('补丁完全在图片外，请调整偏移',1);
   S.base.getContext('2d').drawImage(S.patch,r.x,r.y);S.layer.getContext('2d').drawImage(S.patch,r.x,r.y);
   pushUndo({before,after:snapRect(r),rect:r});S.rects.push(r);
   S.res=null;S.patch=null;S.applied++;S.copied=false;$('ox').value=0;$('oy').value=0;setTab('sel');rebuild();sync();toast('✅ 补丁已应用（双指轻点可撤销），可框选下一处');};
-function undo(){const u=S.undo.pop();if(!u)return toast('没有可撤销的操作');restore(u.before);S.redo.push(u);
+function undo(){commitSel();const u=S.undo.pop();if(!u)return toast('没有可撤销的操作');
+  if(u.selB){S.redo.push(u);S.sel={...u.selB};selSaved={...u.selB};clampSel();sync();rebuild();updUI();return toast('↶ 已撤销框线调整');}
+  restore(u.before);S.redo.push(u);
   if(u.rect){S.rects.pop();S.applied=Math.max(0,S.applied-1);}else if(u.reset){S.rects=u.rects;S.applied=u.applied;}sync();draw();toast('↶ 已撤销');}
-function redo(){const u=S.redo.pop();if(!u)return toast('没有可重做的操作');restore(u.after);S.undo.push(u);
+function redo(){commitSel();const u=S.redo.pop();if(!u)return toast('没有可重做的操作');
+  if(u.selA){S.undo.push(u);S.sel={...u.selA};selSaved={...u.selA};clampSel();sync();rebuild();updUI();return toast('↷ 已重做框线调整');}
+  restore(u.after);S.undo.push(u);
   if(u.rect){S.rects.push(u.rect);S.applied++;}else if(u.reset){S.rects=[];S.applied=0;}sync();draw();toast('↷ 已重做');}
 $('bUndo').onclick=undo;$('bRedo').onclick=redo;
 $('bReset').onclick=()=>{if(!S.base||(!S.applied&&!S.res))return toast('已经是原图');
@@ -737,7 +748,7 @@ function holdBtn(id){const b=$(id);const on=e=>{e.preventDefault();try{b.setPoin
 holdBtn('bHold');holdBtn('bHold2');
 let padStep=1;$('padStep').onclick=()=>{padStep=padStep===1?10:1;$('padStep').textContent=padStep;};
 function nudge(dx,dy){if(!S.base)return;if(S.patch){$('ox').value=(+$('ox').value||0)+dx;$('oy').value=(+$('oy').value||0)+dy;draw();}
-  else{S.sel.x+=dx;S.sel.y+=dy;clampSel();sync();draw();}}
+  else{S.sel.x+=dx;S.sel.y+=dy;clampSel();sync();draw();commitSelSoon();}}
 $$('#pad button[data-d]').forEach(b=>{let t1=0,t2=0;const [dx,dy]=b.dataset.d.split(',').map(Number);
   const stop=()=>{clearTimeout(t1);clearInterval(t2);b.classList.remove('down');};
   b.addEventListener('pointerdown',e=>{e.preventDefault();try{b.setPointerCapture(e.pointerId);}catch(_){}b.classList.add('down');nudge(dx*padStep,dy*padStep);
@@ -775,7 +786,7 @@ document.addEventListener('keydown',e=>{
   const d={arrowleft:[-1,0],arrowright:[1,0],arrowup:[0,-1],arrowdown:[0,1]}[k];
   if(d){e.preventDefault();const m=e.shiftKey?10:1;
     if(S.patch){$('ox').value=(+$('ox').value||0)+d[0]*m;$('oy').value=(+$('oy').value||0)+d[1]*m;draw();}
-    else{S.sel.x+=d[0]*m;S.sel.y+=d[1]*m;clampSel();sync();draw();}return;}
+    else{S.sel.x+=d[0]*m;S.sel.y+=d[1]*m;clampSel();sync();draw();commitSelSoon();}return;}
   if(e.key==='Enter'&&S.patch){e.preventDefault();$('bApply').click();}});
 document.addEventListener('keyup',e=>{if(e.key==='Alt')S.alt=false;if(e.key===' '){S.space=false;if(!drag)view.style.cursor='crosshair';}if(e.key.toLowerCase()==='b'){S.peek=false;draw();}});
 window.addEventListener('blur',()=>{S.space=false;S.alt=false;if(S.peek){S.peek=false;draw();}});
